@@ -64,8 +64,9 @@ class CandidateGenerator:
             if has_negative:
                 continue
 
-            # Check domain restrictions
-            if agent.subscription.target_domains:
+            # Check domain restrictions (allow if direct tag/topic overlap exists)
+            has_tag_match = any(tag.lower() in [t.lower() for t in agent.subscription.topics] for tag in post.tags)
+            if agent.subscription.target_domains and not has_tag_match:
                 if author_domain and author_domain not in agent.subscription.target_domains:
                     continue
 

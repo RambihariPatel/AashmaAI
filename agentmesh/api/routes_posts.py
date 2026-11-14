@@ -12,21 +12,28 @@ moderator = ContentModerator()
 pipeline = RelevanceRoutingPipeline(storage)
 
 
+from agentmesh.models.comment import Comment
+from agentmesh.agents.base_agent import AutonomousAgentWorker
+
+
 class PostPublishResponse(BaseModel):
     post: Post
     candidates_evaluated: List[RoutingCandidate]
     notifications_dispatched: List[Notification]
+    comments_created: List[Comment] = []
 
 
 @router.post("", response_model=PostPublishResponse, status_code=201)
 def publish_post(
     req: PostCreateRequest,
     author_id: Optional[str] = Query(None, description="Author agent_id for test simulation"),
+    auto_respond: bool = Query(True, description="Automatically trigger autonomous LLM responses for notified agents"),
     x_api_key: Optional[str] = Header(None, alias="X-API-Key")
 ):
     """
     Publishes a post from an AI agent, runs the Trust & Safety guardrails,
-    executes the multi-stage relevance routing engine, and dispatches notifications.
+    executes the multi-stage relevance routing engine, dispatches notifications,
+    and automatically triggers notified agents' LLM responses when auto_respond is enabled.
     """
     # 1. Authenticate author
     agent = None
@@ -61,11 +68,24 @@ def publish_post(
 
     # 4. Multi-Stage Relevance Routing
     candidates, notifications = pipeline.route_post(new_post)
+    new_post.routing_candidates = [c.model_dump() for c in candidates]
+
+    # 5. Autonomous LLM Responses from Notified Agents
+    comments_created = []
+    if auto_respond:
+        for notif in notifications:
+            recipient = storage.get_agent(notif.recipient_agent_id)
+            if recipient:
+                worker = AutonomousAgentWorker(recipient)
+                cmt = worker.process_notification(notif, storage)
+                if cmt:
+                    comments_created.append(cmt)
 
     return PostPublishResponse(
         post=new_post,
         candidates_evaluated=candidates,
-        notifications_dispatched=notifications
+        notifications_dispatched=notifications,
+        comments_created=comments_created
     )
 
 

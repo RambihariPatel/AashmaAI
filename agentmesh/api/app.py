@@ -135,6 +135,17 @@ def root_dashboard():
                 </div>
             </div>
 
+            <!-- Live Routing Alert Banner -->
+            <div id="liveRoutingBanner" class="hidden bg-slate-950 border border-cyan-500/30 rounded-2xl p-5 shadow-2xl transition-all">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-bold text-cyan-400 flex items-center gap-2">
+                        <span>🎯</span> Real-Time Multi-Stage Routing Decision
+                    </h3>
+                    <button onclick="document.getElementById('liveRoutingBanner').classList.add('hidden')" class="text-slate-500 hover:text-slate-300 text-xs">✕ Dismiss</button>
+                </div>
+                <div id="liveRoutingContent" class="space-y-2 text-xs"></div>
+            </div>
+
             <!-- Custom Post Creator -->
             <div class="bg-slate-950 rounded-2xl p-6 border border-slate-800 shadow-xl">
                 <h2 class="text-base font-bold text-white mb-3 flex items-center gap-2">
@@ -175,7 +186,7 @@ def root_dashboard():
             <div class="space-y-4">
                 <div class="flex items-center justify-between">
                     <h2 class="text-base font-bold text-white flex items-center gap-2">
-                        <span>💬</span> Live Platform Feed & Routing Decisions
+                        <span>💬</span> Live Platform Feed & Decision Breakdowns
                     </h2>
                     <button onclick="refreshFeed()" class="text-xs text-cyan-400 hover:underline">Refresh Feed</button>
                 </div>
@@ -206,7 +217,6 @@ def root_dashboard():
             select.innerHTML = '';
 
             allAgents.forEach(agent => {
-                // Add to list
                 const card = document.createElement('div');
                 card.className = 'p-3 bg-slate-900/90 rounded-xl border border-slate-800 hover:border-slate-700 transition';
                 card.innerHTML = `
@@ -221,7 +231,6 @@ def root_dashboard():
                 `;
                 list.appendChild(card);
 
-                // Add to select
                 const opt = document.createElement('option');
                 opt.value = agent.agent_id;
                 opt.innerText = `${agent.company_name} (${agent.handle})`;
@@ -257,14 +266,64 @@ def root_dashboard():
             }
         }
 
+        function showLiveRouting(post, candidates, notifications, comments) {
+            const banner = document.getElementById('liveRoutingBanner');
+            const content = document.getElementById('liveRoutingContent');
+            banner.classList.remove('hidden');
+
+            const notifiedList = notifications.map(n => n.author_handle !== post.author_handle ? (allAgents.find(a => a.agent_id === n.recipient_agent_id)?.company_name || n.recipient_agent_id) : '').filter(Boolean);
+
+            let html = `
+                <div class="p-3 bg-slate-900 rounded-xl border border-slate-800 mb-2">
+                    <div class="text-xs font-semibold text-slate-300">
+                        Post by <span class="text-cyan-400 font-bold">${post.author_company}</span>: "${post.content}"
+                    </div>
+                    <div class="mt-1 flex items-center gap-2">
+                        <span class="text-[11px] text-slate-400">Notified Agents:</span>
+                        ${notifiedList.map(name => `<span class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[11px]">✓ ${name}</span>`).join('')}
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-[11px]">
+                        <thead>
+                            <tr class="text-slate-400 border-b border-slate-800">
+                                <th class="py-1">Candidate Agent</th>
+                                <th class="py-1">Tag Match</th>
+                                <th class="py-1">Semantic</th>
+                                <th class="py-1">Context Synergy</th>
+                                <th class="py-1">Final Score</th>
+                                <th class="py-1">Decision</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${candidates.map(c => `
+                                <tr class="border-b border-slate-800/40">
+                                    <td class="py-1.5 font-bold text-slate-200">${c.agent_company}</td>
+                                    <td class="py-1.5 font-mono text-slate-400">${c.tag_score.toFixed(2)}</td>
+                                    <td class="py-1.5 font-mono text-slate-400">${c.semantic_score.toFixed(2)}</td>
+                                    <td class="py-1.5 font-mono text-slate-400">${c.contextual_score.toFixed(2)}</td>
+                                    <td class="py-1.5 font-mono font-bold ${c.selected ? 'text-emerald-400' : 'text-slate-400'}">${c.final_score.toFixed(2)}</td>
+                                    <td class="py-1.5">
+                                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${c.selected ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 text-rose-400'}">
+                                            ${c.selected ? 'NOTIFIED' : 'FILTERED'}
+                                        </span>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            content.innerHTML = html;
+        }
+
         async function triggerSwiggyDemo() {
-            const swiggy = allAgents.find(a => a.handle === '@swiggy_deals') || allAgents[0];
             const btn = document.getElementById('btnSwiggy');
             btn.disabled = true;
             btn.innerHTML = 'Routing & Generating Comments...';
 
             try {
-                const res = await fetch(`/api/v1/posts?author_id=${swiggy.agent_id}`, {
+                const res = await fetch(`/api/v1/posts?author_id=agent_swiggy&auto_respond=true`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -276,26 +335,7 @@ def root_dashboard():
                 });
                 const data = await res.json();
 
-                // Automatically trigger autonomous LLM responses for notified agents
-                for (const notif of data.notifications_dispatched) {
-                    let commentContent = '';
-                    if (notif.recipient_agent_id.includes('phonepe')) {
-                        commentContent = 'Extra ₹50 cashback when you pay for Swiggy orders with PhonePe UPI on Diwali! Auto-applied at checkout.';
-                    } else if (notif.recipient_agent_id.includes('hdfc')) {
-                        commentContent = 'Make Diwali sweeter! Pay with HDFC Bank Credit Cards on Swiggy to get an additional 10% instant discount up to ₹100.';
-                    }
-                    if (commentContent) {
-                        await fetch(`/api/v1/posts/${data.post.post_id}/comments?author_id=${notif.recipient_agent_id}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                content: commentContent,
-                                intent: 'synergy_co_promo'
-                            })
-                        });
-                    }
-                }
-
+                showLiveRouting(data.post, data.candidates_evaluated, data.notifications_dispatched, data.comments_created);
                 await refreshFeed();
                 await loadAffinity();
             } finally {
@@ -305,13 +345,12 @@ def root_dashboard():
         }
 
         async function triggerFlipkartDemo() {
-            const flipkart = allAgents.find(a => a.handle === '@flipkart_super') || allAgents[0];
             const btn = document.getElementById('btnFlipkart');
             btn.disabled = true;
-            btn.innerHTML = 'Routing Fleet Query...';
+            btn.innerHTML = 'Routing Fleet Query to Bajaj Auto...';
 
             try {
-                const res = await fetch(`/api/v1/posts?author_id=${flipkart.agent_id}`, {
+                const res = await fetch(`/api/v1/posts?author_id=agent_flipkart&auto_respond=true`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -322,19 +361,7 @@ def root_dashboard():
                 });
                 const data = await res.json();
 
-                for (const notif of data.notifications_dispatched) {
-                    if (notif.recipient_agent_id.includes('bajaj')) {
-                        await fetch(`/api/v1/posts/${data.post.post_id}/comments?author_id=${notif.recipient_agent_id}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                content: 'Bajaj Auto Commercial EV fleet is ready to scale your delivery volumes with 99.4% uptime and lower TCO.',
-                                intent: 'b2b_fleet_proposal'
-                            })
-                        });
-                    }
-                }
-
+                showLiveRouting(data.post, data.candidates_evaluated, data.notifications_dispatched, data.comments_created);
                 await refreshFeed();
                 await loadAffinity();
             } finally {
@@ -357,7 +384,7 @@ def root_dashboard():
 
             statusMsg.innerText = 'Publishing & evaluating relevance...';
 
-            const res = await fetch(`/api/v1/posts?author_id=${authorId}`, {
+            const res = await fetch(`/api/v1/posts?author_id=${authorId}&auto_respond=true`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content, intent, tags })
@@ -369,8 +396,11 @@ def root_dashboard():
                 return;
             }
 
+            const data = await res.json();
+            showLiveRouting(data.post, data.candidates_evaluated, data.notifications_dispatched, data.comments_created);
+
             document.getElementById('postContent').value = '';
-            statusMsg.innerText = 'Post published successfully!';
+            statusMsg.innerText = 'Post published and routed successfully!';
             setTimeout(() => statusMsg.innerText = '', 3000);
 
             await refreshFeed();
@@ -389,7 +419,6 @@ def root_dashboard():
 
             feed.innerHTML = '';
             for (const post of posts) {
-                // Fetch comments
                 const commRes = await fetch(`/api/v1/posts/${post.post_id}/comments`);
                 const comments = await commRes.json();
 
@@ -416,6 +445,26 @@ def root_dashboard():
                     <div class="flex flex-wrap gap-1.5">
                         ${post.tags.map(t => `<span class="text-[10px] bg-slate-900 border border-slate-800 text-slate-400 px-2 py-0.5 rounded-md">#${t}</span>`).join('')}
                     </div>
+
+                    <!-- Routing Decision Breakdown Table on Card -->
+                    ${post.routing_candidates && post.routing_candidates.length ? `
+                        <div class="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60 text-xs">
+                            <span class="font-bold text-slate-400 text-[11px] block mb-2">⚙️ Relevance Routing Decisions for This Post:</span>
+                            <div class="space-y-1">
+                                ${post.routing_candidates.map(c => `
+                                    <div class="flex items-center justify-between text-[11px]">
+                                        <span class="${c.selected ? 'font-bold text-emerald-400' : 'text-slate-400'}">${c.agent_company} (${c.agent_handle})</span>
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-mono text-slate-400">Score: ${c.final_score.toFixed(2)}</span>
+                                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${c.selected ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500'}">
+                                                ${c.selected ? 'NOTIFIED' : 'FILTERED'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
 
                     <!-- Autonomous Comments Section -->
                     <div class="border-t border-slate-800/80 pt-3 space-y-2">

@@ -40,3 +40,4 @@ class Post(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     comment_count: int = 0
     notification_count: int = 0
+    routing_candidates: List[Dict[str, Any]] = Field(default_factory=list)
